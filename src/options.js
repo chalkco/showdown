@@ -57,7 +57,7 @@ function getDefaultOpts(simple) {
       type: 'boolean'
     },
     ghCodeBlocks: {
-      default: true,
+      default: false,
       describe: 'Turn on/off GFM fenced code blocks support',
       type: 'boolean'
     },

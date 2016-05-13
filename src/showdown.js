@@ -9,15 +9,15 @@ var showdown = {},
     globalOptions = getDefaultOpts(true),
     flavor = {
       github: {
-        omitExtraWLInCodeBlocks:   true,
+        omitExtraWLInCodeBlocks:   false,
         prefixHeaderId:            'user-content-',
         simplifiedAutoLink:        true,
-        literalMidWordUnderscores: true,
-        strikethrough:             true,
-        tables:                    true,
-        tablesHeaderId:            true,
-        ghCodeBlocks:              true,
-        tasklists:                 true
+        literalMidWordUnderscores: false,
+        strikethrough:             false,
+        tables:                    false,
+        tablesHeaderId:            false,
+        ghCodeBlocks:              false,
+        tasklists:                 false
       },
       vanilla: getDefaultOpts(true)
     };

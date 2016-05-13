@@ -59,7 +59,7 @@ function getDefaultOpts(simple) {
       type: 'boolean'
     },
     ghCodeBlocks: {
-      default: true,
+      default: false,
       describe: 'Turn on/off GFM fenced code blocks support',
       type: 'boolean'
     },
@@ -97,15 +97,15 @@ var showdown = {},
     globalOptions = getDefaultOpts(true),
     flavor = {
       github: {
-        omitExtraWLInCodeBlocks:   true,
+        omitExtraWLInCodeBlocks:   false,
         prefixHeaderId:            'user-content-',
         simplifiedAutoLink:        true,
-        literalMidWordUnderscores: true,
-        strikethrough:             true,
-        tables:                    true,
-        tablesHeaderId:            true,
-        ghCodeBlocks:              true,
-        tasklists:                 true
+        literalMidWordUnderscores: false,
+        strikethrough:             false,
+        tables:                    false,
+        tablesHeaderId:            false,
+        ghCodeBlocks:              false,
+        tasklists:                 false
       },
       vanilla: getDefaultOpts(true)
     };
@@ -965,7 +965,9 @@ showdown.Converter = function (converterOptions) {
 
     // run the sub parsers
     text = showdown.subParser('hashHTMLBlocks')(text, options, globals);
+    text = showdown.subParser('hashHTMLSpans')(text, options, globals);
     text = showdown.subParser('stripLinkDefinitions')(text, options, globals);
+    text = showdown.subParser('unhashHTMLSpans')(text, options, globals);
     text = showdown.subParser('unescapeSpecialChars')(text, options, globals);
 
     // attacklab: Restore dollar signs
@@ -1412,6 +1414,33 @@ showdown.subParser('hashHTMLBlocks', function (text, options, globals) {
   // PHP and ASP-style processor instructions (<?...?> and <%...%>)
   text = text.replace(/(?:\n\n)([ ]{0,3}(?:<([?%])[^\r]*?\2>)[ \t]*(?=\n{2,}))/g,
     showdown.subParser('hashElement')(text, options, globals));
+
+  return text;
+});
+
+/**
+ * Hash span elements that should not be parsed as markdown
+ */
+showdown.subParser('hashHTMLSpans', function (text, config, globals) {
+  'use strict';
+
+  var matches = showdown.helper.matchRecursiveRegExp(text, '<code\\b[^>]*>', '</code>', 'gi');
+
+  for (var i = 0; i < matches.length; ++i) {
+    text = text.replace(matches[i][0], '~L' + (globals.gHtmlSpans.push(matches[i][0]) - 1) + 'L');
+  }
+  return text;
+});
+
+/**
+ * Unhash HTML spans
+ */
+showdown.subParser('unhashHTMLSpans', function (text, config, globals) {
+  'use strict';
+
+  for (var i = 0; i < globals.gHtmlSpans.length; ++i) {
+    text = text.replace('~L' + i + 'L', globals.gHtmlSpans[i]);
+  }
 
   return text;
 });
