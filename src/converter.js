@@ -277,9 +277,12 @@ showdown.Converter = function (converterOptions) {
     });
 
     // run the sub parsers
+    text = showdown.subParser('hashPreCodeTags')(text, options, globals);
+    text = showdown.subParser('githubCodeBlocks')(text, options, globals);
     text = showdown.subParser('hashHTMLBlocks')(text, options, globals);
     text = showdown.subParser('hashHTMLSpans')(text, options, globals);
     text = showdown.subParser('stripLinkDefinitions')(text, options, globals);
+    text = showdown.subParser('blockGamut')(text, options, globals);
     text = showdown.subParser('unhashHTMLSpans')(text, options, globals);
     text = showdown.subParser('unescapeSpecialChars')(text, options, globals);
 

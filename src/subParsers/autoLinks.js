@@ -1,7 +1,7 @@
 showdown.subParser('autoLinks', function (text, options, globals) {
   'use strict';
 
-  text = globals.converter._dispatch('autoLinks.before', text, options, globals);
+  text = globals.converter._dispatch('autoLinks.before', text, options);
 
   var simpleURLRegex  = /\b(((https?|ftp|dict):\/\/|www\.)[^'">\s]+\.[^'">\s]+)(?=\s|$)(?!["<>])/gi,
       delimUrlRegex   = /<(((https?|ftp|dict):\/\/|www\.)[^'">\s]+)>/gi,
@@ -23,7 +23,7 @@ showdown.subParser('autoLinks', function (text, options, globals) {
     return showdown.subParser('encodeEmailAddress')(unescapedStr);
   }
 
-  text = globals.converter._dispatch('autoLinks.after', text, options, globals);
+  text = globals.converter._dispatch('autoLinks.after', text, options);
 
   return text;
 });

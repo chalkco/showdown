@@ -964,9 +964,12 @@ showdown.Converter = function (converterOptions) {
     });
 
     // run the sub parsers
+    text = showdown.subParser('hashPreCodeTags')(text, options, globals);
+    text = showdown.subParser('githubCodeBlocks')(text, options, globals);
     text = showdown.subParser('hashHTMLBlocks')(text, options, globals);
     text = showdown.subParser('hashHTMLSpans')(text, options, globals);
     text = showdown.subParser('stripLinkDefinitions')(text, options, globals);
+    text = showdown.subParser('blockGamut')(text, options, globals);
     text = showdown.subParser('unhashHTMLSpans')(text, options, globals);
     text = showdown.subParser('unescapeSpecialChars')(text, options, globals);
 
@@ -1086,7 +1089,7 @@ showdown.Converter = function (converterOptions) {
 showdown.subParser('anchors', function (text, options, globals) {
   'use strict';
 
-  text = globals.converter._dispatch('anchors.before', text, options, globals);
+  text = globals.converter._dispatch('anchors.before', text, options);
 
   var writeAnchorTag = function (wholeMatch, m1, m2, m3, m4, m5, m6, m7) {
     if (showdown.helper.isUndefined(m7)) {
@@ -1210,14 +1213,14 @@ showdown.subParser('anchors', function (text, options, globals) {
    */
   text = text.replace(/(\[([^\[\]]+)])()()()()()/g, writeAnchorTag);
 
-  text = globals.converter._dispatch('anchors.after', text, options, globals);
+  text = globals.converter._dispatch('anchors.after', text, options);
   return text;
 });
 
 showdown.subParser('autoLinks', function (text, options, globals) {
   'use strict';
 
-  text = globals.converter._dispatch('autoLinks.before', text, options, globals);
+  text = globals.converter._dispatch('autoLinks.before', text, options);
 
   var simpleURLRegex  = /\b(((https?|ftp|dict):\/\/|www\.)[^'">\s]+\.[^'">\s]+)(?=\s|$)(?!["<>])/gi,
       delimUrlRegex   = /<(((https?|ftp|dict):\/\/|www\.)[^'">\s]+)>/gi,
@@ -1239,7 +1242,43 @@ showdown.subParser('autoLinks', function (text, options, globals) {
     return showdown.subParser('encodeEmailAddress')(unescapedStr);
   }
 
-  text = globals.converter._dispatch('autoLinks.after', text, options, globals);
+  text = globals.converter._dispatch('autoLinks.after', text, options);
+
+  return text;
+});
+
+/**
+ * These are all the transformations that form block-level
+ * tags like paragraphs, headers, and list items.
+ */
+showdown.subParser('blockGamut', function (text, options, globals) {
+  'use strict';
+
+  text = globals.converter._dispatch('blockGamut.before', text, options);
+
+  // we parse blockquotes first so that we can have headings and hrs
+  // inside blockquotes
+  text = showdown.subParser('blockQuotes')(text, options, globals);
+  text = showdown.subParser('headers')(text, options, globals);
+
+  // Do Horizontal Rules:
+  var key = showdown.subParser('hashBlock')('<hr />', options, globals);
+  text = text.replace(/^[ ]{0,2}([ ]?\*[ ]?){3,}[ \t]*$/gm, key);
+  text = text.replace(/^[ ]{0,2}([ ]?\-[ ]?){3,}[ \t]*$/gm, key);
+  text = text.replace(/^[ ]{0,2}([ ]?_[ ]?){3,}[ \t]*$/gm, key);
+
+  text = showdown.subParser('lists')(text, options, globals);
+  text = showdown.subParser('codeBlocks')(text, options, globals);
+  text = showdown.subParser('tables')(text, options, globals);
+
+  // We already ran _HashHTMLBlocks() before, in Markdown(), but that
+  // was to escape raw HTML in the original Markdown source. This time,
+  // we're escaping the markup we've just created, so that we don't wrap
+  // <p> tags around block-level tags.
+  text = showdown.subParser('hashHTMLBlocks')(text, options, globals);
+  text = showdown.subParser('paragraphs')(text, options, globals);
+
+  text = globals.converter._dispatch('blockGamut.after', text, options);
 
   return text;
 });
@@ -1311,6 +1350,88 @@ showdown.subParser('encodeBackslashEscapes', function (text) {
 });
 
 /**
+ * Encode/escape certain characters inside Markdown code runs.
+ * The point is that in code, these characters are literals,
+ * and lose their special Markdown meanings.
+ */
+showdown.subParser('encodeCode', function (text) {
+  'use strict';
+
+  // Encode all ampersands; HTML entities are not
+  // entities within a Markdown code span.
+  text = text.replace(/&/g, '&amp;');
+
+  // Do the angle bracket song and dance:
+  text = text.replace(/</g, '&lt;');
+  text = text.replace(/>/g, '&gt;');
+
+  // Now, escape characters that are magic in Markdown:
+  text = showdown.helper.escapeCharacters(text, '*_{}[]\\', false);
+
+  // jj the line above breaks this:
+  //---
+  //* Item
+  //   1. Subitem
+  //            special char: *
+  // ---
+
+  return text;
+});
+
+/**
+ *  Input: an email address, e.g. "foo@example.com"
+ *
+ *  Output: the email address as a mailto link, with each character
+ *    of the address encoded as either a decimal or hex entity, in
+ *    the hopes of foiling most address harvesting spam bots. E.g.:
+ *
+ *    <a href="&#x6D;&#97;&#105;&#108;&#x74;&#111;:&#102;&#111;&#111;&#64;&#101;
+ *       x&#x61;&#109;&#x70;&#108;&#x65;&#x2E;&#99;&#111;&#109;">&#102;&#111;&#111;
+ *       &#64;&#101;x&#x61;&#109;&#x70;&#108;&#x65;&#x2E;&#99;&#111;&#109;</a>
+ *
+ *  Based on a filter by Matthew Wickline, posted to the BBEdit-Talk
+ *  mailing list: <http://tinyurl.com/yu7ue>
+ *
+ */
+showdown.subParser('encodeEmailAddress', function (addr) {
+  'use strict';
+
+  var encode = [
+    function (ch) {
+      return '&#' + ch.charCodeAt(0) + ';';
+    },
+    function (ch) {
+      return '&#x' + ch.charCodeAt(0).toString(16) + ';';
+    },
+    function (ch) {
+      return ch;
+    }
+  ];
+
+  addr = 'mailto:' + addr;
+
+  addr = addr.replace(/./g, function (ch) {
+    if (ch === '@') {
+      // this *must* be encoded. I insist.
+      ch = encode[Math.floor(Math.random() * 2)](ch);
+    } else if (ch !== ':') {
+      // leave ':' alone (to spot mailto: later)
+      var r = Math.random();
+      // roughly 10% raw, 45% hex, 45% dec
+      ch = (
+        r > 0.9 ? encode[2](ch) : r > 0.45 ? encode[1](ch) : encode[0](ch)
+      );
+    }
+    return ch;
+  });
+
+  addr = '<a href="' + addr + '">' + addr + '</a>';
+  addr = addr.replace(/">.+:/g, '">'); // strip the mailto: from the visible part
+
+  return addr;
+});
+
+/**
  * Within tags -- meaning between < and > -- encode [\ ` * _] so they
  * don't conflict with their use in Markdown for code, italics and strong.
  */
@@ -1328,6 +1449,55 @@ showdown.subParser('escapeSpecialCharsWithinTagAttributes', function (text) {
   });
 
   return text;
+});
+
+/**
+ * Handle github codeblocks prior to running HashHTML so that
+ * HTML contained within the codeblock gets escaped properly
+ * Example:
+ * ```ruby
+ *     def hello_world(x)
+ *       puts "Hello, #{x}"
+ *     end
+ * ```
+ */
+showdown.subParser('githubCodeBlocks', function (text, options, globals) {
+  'use strict';
+
+  // early exit if option is not enabled
+  if (!options.ghCodeBlocks) {
+    return text;
+  }
+
+  text = globals.converter._dispatch('githubCodeBlocks.before', text, options);
+
+  text += '~0';
+
+  text = text.replace(/(?:^|\n)```(.*)\n([\s\S]*?)\n```/g, function (wholeMatch, language, codeblock) {
+    var end = (options.omitExtraWLInCodeBlocks) ? '' : '\n';
+
+    codeblock = showdown.subParser('encodeCode')(codeblock);
+    codeblock = showdown.subParser('detab')(codeblock);
+    codeblock = codeblock.replace(/^\n+/g, ''); // trim leading newlines
+    codeblock = codeblock.replace(/\n+$/g, ''); // trim trailing whitespace
+
+    codeblock = '<pre><code' + (language ? ' class="' + language + ' language-' + language + '"' : '') + '>' + codeblock + end + '</code></pre>';
+
+    return showdown.subParser('hashBlock')(codeblock, options, globals);
+  });
+
+  // attacklab: strip sentinel
+  text = text.replace(/~0/, '');
+
+  text = globals.converter._dispatch('githubCodeBlocks.after', text, options);
+
+  return text;
+});
+
+showdown.subParser('hashBlock', function (text, options, globals) {
+  'use strict';
+  text = text.replace(/(^\n+|\n+$)/g, '');
+  return '\n\n~K' + (globals.gHtmlBlocks.push(text) - 1) + 'K\n\n';
 });
 
 showdown.subParser('hashElement', function (text, options, globals) {
@@ -1353,69 +1523,135 @@ showdown.subParser('hashElement', function (text, options, globals) {
 showdown.subParser('hashHTMLBlocks', function (text, options, globals) {
   'use strict';
 
-  var blockTags = [
-      'pre',
-      'div',
-      'h1',
-      'h2',
-      'h3',
-      'h4',
-      'h5',
-      'h6',
-      'blockquote',
-      'table',
-      'dl',
-      'ol',
-      'ul',
-      'script',
-      'noscript',
-      'form',
-      'fieldset',
-      'iframe',
-      'math',
-      'style',
-      'section',
-      'header',
-      'footer',
-      'nav',
-      'article',
-      'aside',
-      'address',
-      'audio',
-      'canvas',
-      'figure',
-      'hgroup',
-      'output',
-      'video',
-      'p'
-    ],
-    repFunc = function (wholeMatch, match, left, right) {
-      var txt = wholeMatch;
-      // check if this html element is marked as markdown
-      // if so, it's contents should be parsed as markdown
-      if (left.search(/\bmarkdown\b/) !== -1) {
-        txt = left + globals.converter.makeHtml(match) + right;
-      }
-      return '\n\n~K' + (globals.gHtmlBlocks.push(txt) - 1) + 'K\n\n';
-    };
+  // attacklab: Double up blank lines to reduce lookaround
+  text = text.replace(/\n/g, '\n\n');
 
-  for (var i = 0; i < blockTags.length; ++i) {
-    text = showdown.helper.replaceRecursiveRegExp(text, repFunc, '^(?: |\\t){0,3}<' + blockTags[i] + '\\b[^>]*>', '</' + blockTags[i] + '>', 'gim');
-  }
+  // Hashify HTML blocks:
+  // We only want to do this for block-level HTML tags, such as headers,
+  // lists, and tables. That's because we still want to wrap <p>s around
+  // "paragraphs" that are wrapped in non-block-level tags, such as anchors,
+  // phrase emphasis, and spans. The list of tags we're looking for is
+  // hard-coded:
+  //var block_tags_a =
+  // 'p|div|h[1-6]|blockquote|pre|table|dl|ol|ul|script|noscript|form|fieldset|iframe|math|ins|del|style|section|header|footer|nav|article|aside';
+  // var block_tags_b =
+  // 'p|div|h[1-6]|blockquote|pre|table|dl|ol|ul|script|noscript|form|fieldset|iframe|math|style|section|header|footer|nav|article|aside';
 
-  // HR SPECIAL CASE
+  // First, look for nested blocks, e.g.:
+  //   <div>
+  //     <div>
+  //     tags for inner block must be indented.
+  //     </div>
+  //   </div>
+  //
+  // The outermost tags must start at the left margin for this to match, and
+  // the inner nested divs must be indented.
+  // We need to do this before the next, more liberal match, because the next
+  // match will start at the first `<div>` and stop at the first `</div>`.
+
+  // attacklab: This regex can be expensive when it fails.
+  /*
+   var text = text.replace(/
+   (						// save in $1
+   ^					// start of line  (with /m)
+   <($block_tags_a)	// start tag = $2
+   \b					// word break
+   // attacklab: hack around khtml/pcre bug...
+   [^\r]*?\n			// any number of lines, minimally matching
+   </\2>				// the matching end tag
+   [ \t]*				// trailing spaces/tabs
+   (?=\n+)				// followed by a newline
+   )						// attacklab: there are sentinel newlines at end of document
+   /gm,function(){...}};
+   */
+  text = text.replace(/^(<(p|div|h[1-6]|blockquote|pre|table|dl|ol|ul|script|noscript|form|fieldset|iframe|math|ins|del)\b[^\r]*?\n<\/\2>[ \t]*(?=\n+))/gm,
+                      showdown.subParser('hashElement')(text, options, globals));
+
+  //
+  // Now match more liberally, simply from `\n<tag>` to `</tag>\n`
+  //
+
+  /*
+   var text = text.replace(/
+   (						// save in $1
+   ^					// start of line  (with /m)
+   <($block_tags_b)	// start tag = $2
+   \b					// word break
+   // attacklab: hack around khtml/pcre bug...
+   [^\r]*?				// any number of lines, minimally matching
+   </\2>				// the matching end tag
+   [ \t]*				// trailing spaces/tabs
+   (?=\n+)				// followed by a newline
+   )						// attacklab: there are sentinel newlines at end of document
+   /gm,function(){...}};
+   */
+  text = text.replace(/^(<(p|div|h[1-6]|blockquote|pre|table|dl|ol|ul|script|noscript|form|fieldset|iframe|math|style|section|header|footer|nav|article|aside|address|audio|canvas|figure|hgroup|output|video)\b[^\r]*?<\/\2>[ \t]*(?=\n+)\n)/gm,
+                      showdown.subParser('hashElement')(text, options, globals));
+
+  // Special case just for <hr />. It was easier to make a special case than
+  // to make the other regex more complicated.
+
+  /*
+   text = text.replace(/
+   (						// save in $1
+   \n\n				// Starting after a blank line
+   [ ]{0,3}
+   (<(hr)				// start tag = $2
+   \b					// word break
+   ([^<>])*?			//
+   \/?>)				// the matching end tag
+   [ \t]*
+   (?=\n{2,})			// followed by a blank line
+   )
+   /g,showdown.subParser('hashElement')(text, options, globals));
+   */
   text = text.replace(/(\n[ ]{0,3}(<(hr)\b([^<>])*?\/?>)[ \t]*(?=\n{2,}))/g,
-    showdown.subParser('hashElement')(text, options, globals));
+                      showdown.subParser('hashElement')(text, options, globals));
 
   // Special case for standalone HTML comments:
-  text = text.replace(/(<!(--[^\r]*?--\s*)+>[ \t]*(?=\n{2,}))/g,
-    showdown.subParser('hashElement')(text, options, globals));
+
+  /*
+   text = text.replace(/
+   (						// save in $1
+   \n\n				// Starting after a blank line
+   [ ]{0,3}			// attacklab: g_tab_width - 1
+   <!
+   (--[^\r]*?--\s*)+
+   >
+   [ \t]*
+   (?=\n{2,})			// followed by a blank line
+   )
+   /g,showdown.subParser('hashElement')(text, options, globals));
+   */
+  text = text.replace(/(\n\n[ ]{0,3}<!(--[^\r]*?--\s*)+>[ \t]*(?=\n{2,}))/g,
+                      showdown.subParser('hashElement')(text, options, globals));
 
   // PHP and ASP-style processor instructions (<?...?> and <%...%>)
-  text = text.replace(/(?:\n\n)([ ]{0,3}(?:<([?%])[^\r]*?\2>)[ \t]*(?=\n{2,}))/g,
-    showdown.subParser('hashElement')(text, options, globals));
 
+  /*
+   text = text.replace(/
+   (?:
+   \n\n				// Starting after a blank line
+   )
+   (						// save in $1
+   [ ]{0,3}			// attacklab: g_tab_width - 1
+   (?:
+   <([?%])			// $2
+   [^\r]*?
+   \2>
+   )
+   [ \t]*
+   (?=\n{2,})			// followed by a blank line
+   )
+   /g,showdown.subParser('hashElement')(text, options, globals));
+   */
+  text = text.replace(/(?:\n\n)([ ]{0,3}(?:<([?%])[^\r]*?\2>)[ \t]*(?=\n{2,}))/g,
+                      showdown.subParser('hashElement')(text, options, globals));
+
+  // attacklab: Undo double lines (see comment at top of this function)
+  text = text.replace(/\n\n/g, '\n');
   return text;
+
 });
 
 /**
@@ -1445,10 +1681,26 @@ showdown.subParser('unhashHTMLSpans', function (text, config, globals) {
   return text;
 });
 
+/**
+ * Hash span elements that should not be parsed as markdown
+ */
+showdown.subParser('hashPreCodeTags', function (text, config, globals) {
+  'use strict';
+
+  var repFunc = function (wholeMatch, match, left, right) {
+    // encode html entities
+    var codeblock = left + showdown.subParser('encodeCode')(match) + right;
+    return '\n\n~G' + (globals.ghCodeBlocks.push({text: wholeMatch, codeblock: codeblock}) - 1) + 'G\n\n';
+  };
+
+  text = showdown.helper.replaceRecursiveRegExp(text, repFunc, '^(?: |\\t){0,3}<pre\\b[^>]*>\\s*<code\\b[^>]*>', '^(?: |\\t){0,3}</code>\\s*</pre>', 'gim');
+  return text;
+});
+
 showdown.subParser('italicsAndBold', function (text, options, globals) {
   'use strict';
 
-  text = globals.converter._dispatch('italicsAndBold.before', text, options, globals);
+  text = globals.converter._dispatch('italicsAndBold.before', text, options);
 
   if (options.literalMidWordUnderscores) {
     //underscores
@@ -1465,8 +1717,68 @@ showdown.subParser('italicsAndBold', function (text, options, globals) {
     text = text.replace(/(\*|_)(?=\S)([^\r]*?\S)\1/g, '<em>$2</em>');
   }
 
-  text = globals.converter._dispatch('italicsAndBold.after', text, options, globals);
+  text = globals.converter._dispatch('italicsAndBold.after', text, options);
   return text;
+});
+
+/**
+ * Remove one level of line-leading tabs or spaces
+ */
+showdown.subParser('outdent', function (text) {
+  'use strict';
+
+  // attacklab: hack around Konqueror 3.5.4 bug:
+  // "----------bug".replace(/^-/g,"") == "bug"
+  text = text.replace(/^(\t|[ ]{1,4})/gm, '~0'); // attacklab: g_tab_width
+
+  // attacklab: clean up hack
+  text = text.replace(/~0/g, '');
+
+  return text;
+});
+
+/**
+ *
+ */
+showdown.subParser('paragraphs', function (text, options, globals) {
+  'use strict';
+
+  text = globals.converter._dispatch('paragraphs.before', text, options);
+  // Strip leading and trailing lines:
+  text = text.replace(/^\n+/g, '');
+  text = text.replace(/\n+$/g, '');
+
+  var grafs = text.split(/\n{2,}/g),
+      grafsOut = [],
+      end = grafs.length; // Wrap <p> tags
+
+  for (var i = 0; i < end; i++) {
+    var str = grafs[i];
+
+    // if this is an HTML marker, copy it
+    if (str.search(/~K(\d+)K/g) >= 0) {
+      grafsOut.push(str);
+    } else if (str.search(/\S/) >= 0) {
+      str = showdown.subParser('spanGamut')(str, options, globals);
+      str = str.replace(/^([ \t]*)/g, '<p>');
+      str += '</p>';
+      grafsOut.push(str);
+    }
+  }
+
+  /** Unhashify HTML blocks */
+  end = grafsOut.length;
+  for (i = 0; i < end; i++) {
+    // if this is a marker for an html block...
+    while (grafsOut[i].search(/~K(\d+)K/) >= 0) {
+      var blockText = globals.gHtmlBlocks[RegExp.$1];
+      blockText = blockText.replace(/\$/g, '$$$$'); // Escape any dollar signs
+      grafsOut[i] = grafsOut[i].replace(/~K\d+K/, blockText);
+    }
+  }
+
+  text = globals.converter._dispatch('paragraphs.after', text, options);
+  return grafsOut.join('\n\n');
 });
 
 /**
@@ -1487,6 +1799,38 @@ showdown.subParser('runExtension', function (ext, text, options, globals) {
     text = text.replace(re, ext.replace);
   }
 
+  return text;
+});
+
+/**
+ * These are all the transformations that occur *within* block-level
+ * tags like paragraphs, headers, and list items.
+ */
+showdown.subParser('spanGamut', function (text, options, globals) {
+  'use strict';
+
+  text = globals.converter._dispatch('spanGamut.before', text, options);
+  text = showdown.subParser('codeSpans')(text, options, globals);
+  text = showdown.subParser('escapeSpecialCharsWithinTagAttributes')(text, options, globals);
+  text = showdown.subParser('encodeBackslashEscapes')(text, options, globals);
+
+  // Process anchor and image tags. Images must come first,
+  // because ![foo][f] looks like an anchor.
+  text = showdown.subParser('images')(text, options, globals);
+  text = showdown.subParser('anchors')(text, options, globals);
+
+  // Make links out of things like `<http://example.com/>`
+  // Must come after _DoAnchors(), because you can use < and >
+  // delimiters in inline links like [this](<url>).
+  text = showdown.subParser('autoLinks')(text, options, globals);
+  text = showdown.subParser('encodeAmpsAndAngles')(text, options, globals);
+  text = showdown.subParser('italicsAndBold')(text, options, globals);
+  text = showdown.subParser('strikethrough')(text, options, globals);
+
+  // Do hard breaks:
+  text = text.replace(/  +\n/g, ' <br />\n');
+
+  text = globals.converter._dispatch('spanGamut.after', text, options);
   return text;
 });
 
