@@ -10,7 +10,7 @@ showdown.subParser('autoLinks', function (text, options, globals) {
 
   text = text.replace(delimUrlRegex, '<a href=\"$1\">$1</a>');
   text = text.replace(delimMailRegex, replaceMail);
-  //simpleURLRegex  = /\b(((https?|ftp|dict):\/\/|www\.)[-.+~:?#@!$&'()*,;=[\]\w]+)\b/gi,
+  // simpleURLRegex  = /\b(((https?|ftp|dict):\/\/|www\.)[-.+~:?#@!$&'()*,;=[\]\w]+)\b/gi,
   // Email addresses: <address@domain.foo>
 
   if (options.simplifiedAutoLink) {

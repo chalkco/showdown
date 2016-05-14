@@ -11,7 +11,7 @@ var showdown = {},
       github: {
         omitExtraWLInCodeBlocks:   false,
         prefixHeaderId:            'user-content-',
-        simplifiedAutoLink:        true,
+        simplifiedAutoLink:        false,
         literalMidWordUnderscores: false,
         strikethrough:             false,
         tables:                    false,
