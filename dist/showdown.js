@@ -1,4 +1,4 @@
-;/*! showdown 13-05-2016 */
+;/*! showdown 03-06-2016 */
 (function(){
 /**
  * Created by Tivie on 13-07-2015.
@@ -34,7 +34,7 @@ function getDefaultOpts(simple) {
       type: 'boolean'
     },
     simplifiedAutoLink: {
-      default: true,
+      default: false,
       describe: 'Turn on/off GFM autolink style',
       type: 'boolean'
     },
@@ -1822,6 +1822,7 @@ showdown.subParser('spanGamut', function (text, options, globals) {
   // Make links out of things like `<http://example.com/>`
   // Must come after _DoAnchors(), because you can use < and >
   // delimiters in inline links like [this](<url>).
+  text = showdown.subParser('anchors')(text, options, globals);
   text = showdown.subParser('autoLinks')(text, options, globals);
   text = showdown.subParser('encodeAmpsAndAngles')(text, options, globals);
   text = showdown.subParser('italicsAndBold')(text, options, globals);
